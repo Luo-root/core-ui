@@ -42,7 +42,7 @@ const waitForOverlayOverflow = (viewport: HTMLElement) =>
     const timeout = setTimeout(finish, overlayUpdateTimeout);
     observer.observe(viewport, {
       attributes: true,
-      attributeFilter: [overlayViewportAttribute]
+      attributeFilter: [overlayViewportAttribute, 'style', 'class']
     });
   });
 

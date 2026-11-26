@@ -12,6 +12,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import useScrollAfterExpand from '../use-field-scroll';
 
 const attribute = 'data-overlayscrollbars-viewport';
+const overflowUpdates = {
+  attribute: (el: HTMLElement) => el.setAttribute(attribute, 'overflowYScroll'),
+  style: (el: HTMLElement) => {
+    el.style.overflowY = 'scroll';
+  },
+  class: (el: HTMLElement) => el.classList.add('is-scrollable')
+};
 const segmentOptions = ['basic', 'pd'].map((value) => ({
   value,
   field: value
@@ -20,6 +27,7 @@ const scrollTo = vi.fn();
 type ScrollToSegment = (key: string) => Promise<void>;
 const formRef = createRef<ScrollToSegment>();
 let viewport: HTMLElement;
+let stylesheet: HTMLStyleElement;
 let root: Root;
 
 const Form = forwardRef<ScrollToSegment>(function Form(_, ref) {
@@ -54,20 +62,25 @@ const advance = (ms: number) =>
     await vi.advanceTimersByTimeAsync(ms);
   });
 
-const updateOverflow = async () => {
-  await act(async () => {
-    viewport.style.overflowY = 'scroll';
-    viewport.setAttribute(attribute, 'overflowYScroll');
+const updateOverflow = (via: keyof typeof overflowUpdates = 'attribute') =>
+  act(async () => {
+    overflowUpdates[via](viewport);
   });
-};
 
 beforeEach(() => {
   vi.useFakeTimers();
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   scrollTo.mockReset();
   viewport = document.createElement('div');
-  viewport.style.overflowY = 'hidden';
+  viewport.id = 'overlay-viewport';
   viewport.setAttribute(attribute, 'overflowYHidden');
+  stylesheet = document.createElement('style');
+  stylesheet.textContent = `
+    #overlay-viewport { overflow-y: hidden; }
+    #overlay-viewport[${attribute}~="overflowYScroll"],
+    #overlay-viewport.is-scrollable { overflow-y: scroll; }
+  `;
+  document.head.append(stylesheet);
   Object.defineProperties(viewport, {
     clientHeight: { value: 600 },
     scrollHeight: { value: 1200 },
@@ -85,24 +98,28 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   viewport.remove();
+  stylesheet.remove();
   vi.clearAllTimers();
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
 describe('navigation during the first OverlayScrollbars overflow update', () => {
-  it('waits for overflow even when the expanded content needs no holder', async () => {
-    const pending = navigate('pd');
-    await advance(80);
-    expect(scrollTo).not.toHaveBeenCalled();
+  it.each(['attribute', 'style', 'class'] as const)(
+    'scrolls as soon as overflow is enabled by %s, even without a holder',
+    async (via) => {
+      const pending = navigate('pd');
+      await advance(80);
+      expect(scrollTo).not.toHaveBeenCalled();
 
-    await updateOverflow();
-    await pending;
-    expect(scrollTo).toHaveBeenCalledExactlyOnceWith({
-      top: 204,
-      behavior: 'smooth'
-    });
-  });
+      await updateOverflow(via);
+      expect(scrollTo).toHaveBeenCalledExactlyOnceWith({
+        top: 204,
+        behavior: 'smooth'
+      });
+      await pending;
+    }
+  );
 
   it('does not let an older navigation scroll after a newer request', async () => {
     const pending = navigate('pd');
@@ -121,6 +138,12 @@ describe('navigation during the first OverlayScrollbars overflow update', () => 
 
   it('does not wait indefinitely when overflow stays hidden', async () => {
     const pending = navigate('pd');
+    await advance(80);
+    await act(async () => {
+      viewport.style.color = 'black';
+      viewport.classList.add('unrelated');
+    });
+    expect(scrollTo).not.toHaveBeenCalled();
     await act(async () => {
       await vi.runAllTimersAsync();
     });
